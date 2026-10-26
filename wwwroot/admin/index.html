@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Tuition Centre</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 24px 16px;
+        }
+        h1 {
+            font-size: 1.5rem;
+            color: #1a1a2e;
+            margin-bottom: 16px;
+        }
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .filter-btn {
+            padding: 6px 16px;
+            border: 1px solid #d0d5dd;
+            border-radius: 6px;
+            background: #fff;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+        .filter-btn:hover { border-color: #4a90d9; color: #4a90d9; }
+        .filter-btn.active {
+            background: #4a90d9;
+            color: #fff;
+            border-color: #4a90d9;
+        }
+        .stats {
+            margin-left: auto;
+            font-size: 0.9rem;
+            color: #555;
+        }
+        .stats span { font-weight: 700; color: #1a1a2e; }
+        .stats .pending { color: #e74c3c; }
+        .table-wrap {
+            overflow-x: auto;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+        }
+        thead th {
+            background: #f0f3f8;
+            text-align: left;
+            padding: 10px 12px;
+            font-weight: 600;
+            color: #555;
+            white-space: nowrap;
+            position: sticky;
+            top: 0;
+        }
+        tbody td {
+            padding: 10px 12px;
+            border-top: 1px solid #eee;
+            vertical-align: top;
+        }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.78rem;
+            font-weight: 600;
+        }
+        .badge-human {
+            background: #ffeef0;
+            color: #c0392b;
+        }
+        .badge-approved {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+        .badge-category {
+            background: #e3f2fd;
+            color: #1565c0;
+        }
+        .draft-area {
+            width: 100%;
+            min-width: 200px;
+            min-height: 60px;
+            padding: 6px 8px;
+            border: 1px solid #d0d5dd;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-family: inherit;
+            resize: vertical;
+        }
+        .draft-area:focus {
+            outline: none;
+            border-color: #4a90d9;
+        }
+        .draft-area:disabled {
+            background: #f5f5f5;
+            color: #888;
+        }
+        .approve-btn {
+            padding: 6px 14px;
+            background: #4a90d9;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: background 0.2s;
+            white-space: nowrap;
+        }
+        .approve-btn:hover { background: #3a7bc8; }
+        .approve-btn:disabled { background: #a0c4e8; cursor: not-allowed; }
+        .empty-state {
+            text-align: center;
+            padding: 48px 16px;
+            color: #999;
+        }
+        .question-cell {
+            max-width: 220px;
+            word-break: break-word;
+        }
+        .msg {
+            margin-bottom: 12px;
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 0.88rem;
+            display: none;
+        }
+        .msg.error { display: block; background: #ffeef0; color: #c0392b; border: 1px solid #f5c6cb; }
+        .msg.success { display: block; background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Admin Dashboard</h1>
+
+        <div class="toolbar">
+            <button class="filter-btn active" data-branch="">All</button>
+            <button class="filter-btn" data-branch="SS2">SS2</button>
+            <button class="filter-btn" data-branch="SS15">SS15</button>
+            <div class="stats">
+                Total: <span id="totalCount">0</span> &nbsp;|&nbsp; Pending Human: <span class="pending" id="pendingCount">0</span>
+            </div>
+        </div>
+
+        <div id="message" class="msg"></div>
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Parent</th>
+                        <th>Phone</th>
+                        <th>Branch</th>
+                        <th>Age</th>
+                        <th>Question</th>
+                        <th>Category</th>
+                        <th>Status</th>
+                        <th>AI Draft Reply</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="tbody"></tbody>
+            </table>
+            <div id="emptyState" class="empty-state" style="display:none;">No enquiries yet</div>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            var currentBranch = '';
+            var msgEl = document.getElementById('message');
+
+            // Filter buttons
+            document.querySelectorAll('.filter-btn').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    document.querySelectorAll('.filter-btn').forEach(function (b) {
+                        b.classList.remove('active');
+                    });
+                    btn.classList.add('active');
+                    currentBranch = btn.getAttribute('data-branch');
+                    loadEnquiries();
+                });
+            });
+
+            function loadEnquiries() {
+                var url = '/admin/api/enquiries';
+                if (currentBranch) url += '?branch=' + encodeURIComponent(currentBranch);
+
+                fetch(url)
+                    .then(function (res) {
+                        if (!res.ok) throw new Error('Load failed');
+                        return res.json();
+                    })
+                    .then(function (data) {
+                        document.getElementById('totalCount').textContent = data.total;
+                        document.getElementById('pendingCount').textContent = data.pendingHuman;
+                        renderTable(data.enquiries);
+                    })
+                    .catch(function () {
+                        showMsg('error', 'Failed to load data. Please refresh the page.');
+                    });
+            }
+
+            function renderTable(enquiries) {
+                var tbody = document.getElementById('tbody');
+                var emptyState = document.getElementById('emptyState');
+                tbody.innerHTML = '';
+
+                if (!enquiries || enquiries.length === 0) {
+                    emptyState.style.display = 'block';
+                    return;
+                }
+                emptyState.style.display = 'none';
+
+                enquiries.forEach(function (e) {
+                    var tr = document.createElement('tr');
+
+                    // Time
+                    var tdTime = document.createElement('td');
+                    tdTime.textContent = formatTime(e.createdAt);
+                    tr.appendChild(tdTime);
+
+                    // Parent name
+                    var tdName = document.createElement('td');
+                    tdName.textContent = e.parentName;
+                    tr.appendChild(tdName);
+
+                    // Phone
+                    var tdPhone = document.createElement('td');
+                    tdPhone.textContent = e.phone;
+                    tr.appendChild(tdPhone);
+
+                    // Branch
+                    var tdBranch = document.createElement('td');
+                    tdBranch.textContent = e.branch;
+                    tr.appendChild(tdBranch);
+
+                    // Age
+                    var tdAge = document.createElement('td');
+                    tdAge.textContent = e.childAge;
+                    tr.appendChild(tdAge);
+
+                    // Question
+                    var tdQ = document.createElement('td');
+                    tdQ.className = 'question-cell';
+                    tdQ.textContent = e.question;
+                    tr.appendChild(tdQ);
+
+                    // Category
+                    var tdCat = document.createElement('td');
+                    var catBadge = document.createElement('span');
+                    catBadge.className = 'badge badge-category';
+                    catBadge.textContent = e.category || 'Other';
+                    tdCat.appendChild(catBadge);
+                    tr.appendChild(tdCat);
+
+                    // Status badges
+                    var tdStatus = document.createElement('td');
+                    if (e.needsHuman && !e.approved) {
+                        var humanBadge = document.createElement('span');
+                        humanBadge.className = 'badge badge-human';
+                        humanBadge.textContent = 'Needs Human';
+                        tdStatus.appendChild(humanBadge);
+                    }
+                    if (e.approved) {
+                        var appBadge = document.createElement('span');
+                        appBadge.className = 'badge badge-approved';
+                        appBadge.textContent = 'Approved';
+                        tdStatus.appendChild(appBadge);
+                    }
+                    tr.appendChild(tdStatus);
+
+                    // Draft reply textarea
+                    var tdDraft = document.createElement('td');
+                    var textarea = document.createElement('textarea');
+                    textarea.className = 'draft-area';
+                    textarea.value = e.draftReply || '';
+                    textarea.id = 'draft-' + e.id;
+                    if (e.approved) textarea.disabled = true;
+                    tdDraft.appendChild(textarea);
+                    tr.appendChild(tdDraft);
+
+                    // Approve button
+                    var tdAction = document.createElement('td');
+                    if (!e.approved) {
+                        var btn = document.createElement('button');
+                        btn.className = 'approve-btn';
+                        btn.textContent = 'Approve';
+                        btn.setAttribute('data-id', e.id);
+                        btn.addEventListener('click', function () {
+                            approveEnquiry(e.id, btn);
+                        });
+                        tdAction.appendChild(btn);
+                    }
+                    tr.appendChild(tdAction);
+
+                    tbody.appendChild(tr);
+                });
+            }
+
+            function approveEnquiry(id, btn) {
+                var textarea = document.getElementById('draft-' + id);
+                var draftReply = textarea.value.trim();
+
+                if (!draftReply) {
+                    showMsg('error', 'Reply cannot be empty. Please write a reply before approving.');
+                    return;
+                }
+
+                btn.disabled = true;
+                btn.textContent = 'Processing...';
+                hideMsg();
+
+                fetch('/admin/api/enquiries/' + id + '/approve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ draftReply: draftReply })
+                })
+                .then(function (res) {
+                    return res.json().then(function (data) {
+                        return { ok: res.ok, data: data };
+                    });
+                })
+                .then(function (result) {
+                    if (result.ok) {
+                        showMsg('success', 'Enquiry #' + id + ' approved.');
+                        loadEnquiries();
+                    } else {
+                        showMsg('error', result.data.error || 'Operation failed.');
+                        btn.disabled = false;
+                        btn.textContent = 'Approve';
+                    }
+                })
+                .catch(function () {
+                    showMsg('error', 'Operation failed. Please try again.');
+                    btn.disabled = false;
+                    btn.textContent = 'Approve';
+                });
+            }
+
+            function formatTime(iso) {
+                if (!iso) return '';
+                var d = new Date(iso);
+                var pad = function (n) { return n < 10 ? '0' + n : n; };
+                return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+                    + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+            }
+
+            function showMsg(type, text) {
+                msgEl.className = 'msg ' + type;
+                msgEl.style.display = 'block';
+                msgEl.textContent = text;
+            }
+
+            function hideMsg() {
+                msgEl.className = 'msg';
+                msgEl.style.display = 'none';
+            }
+
+            // Initial load
+            loadEnquiries();
+        })();
+    </script>
+</body>
+</html>

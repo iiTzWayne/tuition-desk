@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tuition Centre - Enquiry Form</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 520px;
+            margin: 40px auto;
+            padding: 0 16px;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 8px;
+            font-size: 1.6rem;
+            color: #1a1a2e;
+        }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 24px;
+            font-size: 0.95rem;
+        }
+        .card {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            padding: 28px 24px;
+        }
+        .field { margin-bottom: 18px; }
+        .field label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 6px;
+            font-size: 0.9rem;
+            color: #444;
+        }
+        .field label .req { color: #e74c3c; margin-left: 2px; }
+        .field input,
+        .field select,
+        .field textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #d0d5dd;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+        .field input:focus,
+        .field select:focus,
+        .field textarea:focus {
+            outline: none;
+            border-color: #4a90d9;
+            box-shadow: 0 0 0 3px rgba(74,144,217,0.12);
+        }
+        .field textarea { resize: vertical; min-height: 100px; }
+        .field .hint {
+            font-size: 0.8rem;
+            color: #999;
+            margin-top: 4px;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            background: #4a90d9;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn:hover { background: #3a7bc8; }
+        .btn:disabled { background: #a0c4e8; cursor: not-allowed; }
+        .msg {
+            margin-top: 16px;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            display: none;
+        }
+        .msg.success { display: block; background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+        .msg.error { display: block; background: #ffeef0; color: #c0392b; border: 1px solid #f5c6cb; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Tuition Centre</h1>
+        <p class="subtitle">Enquiry Form &mdash; SS2 &amp; SS15 Branches</p>
+        <div class="card">
+            <form id="enquiryForm" novalidate>
+                <div class="field">
+                    <label>Parent Name <span class="req">*</span></label>
+                    <input type="text" id="parentName" maxlength="100" placeholder="Your full name" required>
+                </div>
+                <div class="field">
+                    <label>Phone Number <span class="req">*</span></label>
+                    <input type="text" id="phone" maxlength="30" placeholder="e.g. 012-3456789" required>
+                </div>
+                <div class="field">
+                    <label>Branch <span class="req">*</span></label>
+                    <select id="branch" required>
+                        <option value="">— Please select —</option>
+                        <option value="SS2">SS2</option>
+                        <option value="SS15">SS15</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Child's Age <span class="req">*</span></label>
+                    <input type="number" id="childAge" min="1" max="99" placeholder="e.g. 10" required>
+                </div>
+                <div class="field">
+                    <label>Question <span class="req">*</span></label>
+                    <textarea id="question" maxlength="1000" placeholder="What would you like to know?" required></textarea>
+                    <div class="hint">Max 1000 characters</div>
+                </div>
+                <button type="submit" class="btn" id="submitBtn">Submit Enquiry</button>
+            </form>
+            <div id="message" class="msg"></div>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            var form = document.getElementById('enquiryForm');
+            var msgEl = document.getElementById('message');
+            var submitBtn = document.getElementById('submitBtn');
+
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                msgEl.className = 'msg';
+                msgEl.style.display = 'none';
+
+                var parentName = document.getElementById('parentName').value.trim();
+                var phone = document.getElementById('phone').value.trim();
+                var branch = document.getElementById('branch').value;
+                var childAge = parseInt(document.getElementById('childAge').value, 10);
+                var question = document.getElementById('question').value.trim();
+
+                // Client-side validation
+                var errors = [];
+                if (!parentName) errors.push('Parent name is required');
+                else if (parentName.length > 100) errors.push('Parent name must not exceed 100 characters');
+                if (!phone) errors.push('Phone number is required');
+                else if (phone.length > 30) errors.push('Phone number must not exceed 30 characters');
+                if (branch !== 'SS2' && branch !== 'SS15') errors.push('Please select a branch');
+                if (isNaN(childAge) || childAge < 1 || childAge > 99) errors.push('Child\'s age must be between 1 and 99');
+                if (!question) errors.push('Question is required');
+                else if (question.length > 1000) errors.push('Question must not exceed 1000 characters');
+
+                if (errors.length > 0) {
+                    showMsg('error', errors.join('; '));
+                    return;
+                }
+
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Submitting...';
+
+                fetch('/api/enquiries', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        parentName: parentName,
+                        phone: phone,
+                        branch: branch,
+                        childAge: childAge,
+                        question: question
+                    })
+                })
+                .then(function (res) {
+                    if (res.status === 429) {
+                        showMsg('error', 'Too many requests. Please try again later.');
+                        return null;
+                    }
+                    return res.json().then(function (data) {
+                        return { ok: res.ok, data: data };
+                    });
+                })
+                .then(function (result) {
+                    if (!result) return;
+                    if (result.ok) {
+                        showMsg('success', 'Submitted successfully! Your enquiry number is #' + result.data.id);
+                        form.reset();
+                    } else {
+                        var errMsg = result.data.errors
+                            ? result.data.errors.join('; ')
+                            : 'Submission failed. Please try again later.';
+                        showMsg('error', errMsg);
+                    }
+                })
+                .catch(function () {
+                    showMsg('error', 'Submission failed. Please try again later.');
+                })
+                .finally(function () {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Submit Enquiry';
+                });
+            });
+
+            function showMsg(type, text) {
+                msgEl.className = 'msg ' + type;
+                msgEl.style.display = 'block';
+                msgEl.textContent = text;
+            }
+        })();
+    </script>
+</body>
+</html>
