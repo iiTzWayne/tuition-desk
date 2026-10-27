@@ -88,3 +88,12 @@ tuition-desk/
 | `ConnectionStrings__Default` | PostgreSQL connection string |
 | `Gemini__ApiKey` | Google AI Studio API key |
 | `ADMIN_PASSWORD` | Admin dashboard password |
+
+## Design Decisions & Limitations
+
+- **The AI draft is never shown to parents.** Staff review, edit and approve every reply in the admin dashboard.
+- **"Pending Human"** counts enquiries flagged "Needs Human" that have not been approved yet.
+- **Any AI failure is safe.** If the AI call fails, returns invalid output or an empty draft, the enquiry is saved as "Other" with "Needs Human" and no draft. It never invents an answer.
+- **Parent text is treated as data**, so instructions typed into the form are ignored.
+- **Admin is password-protected** (HTTP Basic auth) because it shows phone numbers.
+- **Limitations:** one shared admin password (no per-user login); the free Render tier sleeps after inactivity (first load can take 30–50 seconds); Gemini's free tier has rate limits, so a burst of submissions may fall back to "Needs Human" with no draft.
