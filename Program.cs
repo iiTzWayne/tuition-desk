@@ -23,7 +23,10 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
 // ---------------------------------------------------------------------------
 // Gemini service
 // ---------------------------------------------------------------------------
-builder.Services.AddHttpClient<GeminiService>();
+builder.Services.AddHttpClient<GeminiService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
 
 // ---------------------------------------------------------------------------
 // Rate limiter – 20 requests / 60 s on the enquiry endpoint
@@ -258,6 +261,9 @@ public class GeminiService
     private readonly HttpClient _http;
     private readonly string _model;
     private readonly string? _apiKey;
+    private readonly ILogger<GeminiService> _logger;
+
+    private static readonly int[] RetryableStatusCodes = { 429, 500, 503 };
 
     private const string SystemPrompt = @"You are the enquiry assistant for a tuition centre with two branches, SS2 and SS15.
 Answer ONLY from the FAQ below. Never invent, guess or assume any fact that is not in the FAQ.
@@ -284,11 +290,12 @@ Rules:
 7. State facts exactly as the FAQ states them. Do not add qualifiers or details the FAQ does not give (for example 'one-time', 'per year', 'refundable', discounts, deadlines, staff names, addresses or phone numbers).
 8. Return ONLY a JSON object, no markdown: {""category"":""Fees|Schedule|Courses|Other"",""needs_human"":true or false,""draft_reply"":""...""}";
 
-    public GeminiService(HttpClient http, IConfiguration config)
+    public GeminiService(HttpClient http, IConfiguration config, ILogger<GeminiService> logger)
     {
         _http = http;
         _apiKey = config["Gemini:ApiKey"];
         _model = config["Gemini:Model"] ?? "gemini-2.5-flash";
+        _logger = logger;
     }
 
     public async Task<TriageResult> TriageAsync(string parentName, string branch, int childAge, string question)
@@ -296,99 +303,172 @@ Rules:
         var fallback = new TriageResult { Category = "Other", NeedsHuman = true, DraftReply = "" };
 
         if (string.IsNullOrEmpty(_apiKey))
-            return fallback;
-
-        try
         {
-            var userMessage = $"Parent: {parentName}, Branch: {branch}, Child age: {childAge}\nMessage: {question}";
+            _logger.LogWarning("API key is not configured; returning fallback.");
+            return fallback;
+        }
 
-            var requestBody = new
+        var userMessage = $"Parent: {parentName}, Branch: {branch}, Child age: {childAge}\nMessage: {question}";
+
+        var requestBody = new
+        {
+            system_instruction = new
             {
-                system_instruction = new
+                parts = new[] { new { text = SystemPrompt } }
+            },
+            contents = new[]
+            {
+                new
                 {
-                    parts = new[] { new { text = SystemPrompt } }
-                },
-                contents = new[]
-                {
-                    new
-                    {
-                        role = "user",
-                        parts = new[] { new { text = userMessage } }
-                    }
-                },
-                generationConfig = new
-                {
-                    temperature = 0.0,
-                    maxOutputTokens = 2048,
-                    responseMimeType = "application/json"
+                    role = "user",
+                    parts = new[] { new { text = userMessage } }
                 }
-            };
-
-            var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={_apiKey}";
-            var jsonContent = JsonSerializer.Serialize(requestBody);
-            var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
+            },
+            generationConfig = new
             {
-                Content = new StringContent(jsonContent, Encoding.UTF8, "application/json")
-            };
-
-            var response = await _http.SendAsync(httpRequest);
-            if (!response.IsSuccessStatusCode)
-            {
-                var errBody = await response.Content.ReadAsStringAsync();
-                Console.WriteLine($"[GeminiService HTTP {(int)response.StatusCode}] {errBody}");
-                return fallback;
+                temperature = 0.0,
+                maxOutputTokens = 2048,
+                responseMimeType = "application/json",
+                thinkingConfig = new { thinkingBudget = 0 }
             }
+        };
 
-            var responseJson = await response.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(responseJson);
+        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_model}:generateContent?key={_apiKey}";
+        var jsonContent = JsonSerializer.Serialize(requestBody);
 
-            // Extract text from candidates[0].content.parts[0].text
-            var text = doc.RootElement
-                .GetProperty("candidates")[0]
-                .GetProperty("content")
-                .GetProperty("parts")[0]
-                .GetProperty("text")
-                .GetString();
+        const int maxAttempts = 3;
+        int[] retryDelaysMs = { 1000, 2000 };
 
-            if (string.IsNullOrWhiteSpace(text))
-                return fallback;
-
-            // Strip markdown code fences if the model wraps its JSON in ```json ... ```
-            var trimmed = text.Trim();
-            if (trimmed.StartsWith("```"))
-            {
-                var firstNewline = trimmed.IndexOf('\n');
-                if (firstNewline >= 0)
-                    trimmed = trimmed[(firstNewline + 1)..];
-                if (trimmed.EndsWith("```"))
-                    trimmed = trimmed[..^3];
-                trimmed = trimmed.Trim();
-            }
-
-            // Parse the AI's JSON response
-            using var triageDoc = JsonDocument.Parse(trimmed);
-            var root = triageDoc.RootElement;
-
-            var category = root.GetProperty("category").GetString() ?? "Other";
-            if (category is not ("Fees" or "Schedule" or "Courses" or "Other"))
-                category = "Other";
-
-            var needsHuman = root.GetProperty("needs_human").GetBoolean();
-            var draftReply = root.GetProperty("draft_reply").GetString() ?? "";
-
-            return new TriageResult
-            {
-                Category = category,
-                NeedsHuman = needsHuman,
-                DraftReply = draftReply
-            };
-        }
-        catch (Exception ex)
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            Console.WriteLine($"[GeminiService Exception] {ex.Message}");
-            return fallback;
+            try
+            {
+                var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
+                {
+                    Content = new StringContent(jsonContent, Encoding.UTF8, "application/json")
+                };
+
+                var response = await _http.SendAsync(httpRequest);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var statusCode = (int)response.StatusCode;
+                    var errBody = await response.Content.ReadAsStringAsync();
+                    _logger.LogWarning("HTTP {StatusCode} on attempt {Attempt}: {Body}",
+                        statusCode, attempt, Truncate(errBody, 200));
+
+                    if (RetryableStatusCodes.Contains(statusCode) && attempt < maxAttempts)
+                    {
+                        await Task.Delay(retryDelaysMs[attempt - 1]);
+                        continue;
+                    }
+
+                    return fallback;
+                }
+
+                var responseJson = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(responseJson);
+
+                // Extract text from candidates[0].content.parts[0].text
+                var text = doc.RootElement
+                    .GetProperty("candidates")[0]
+                    .GetProperty("content")
+                    .GetProperty("parts")[0]
+                    .GetProperty("text")
+                    .GetString();
+
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    _logger.LogWarning("Empty text in Gemini response on attempt {Attempt}.", attempt);
+                    if (attempt < maxAttempts)
+                    {
+                        await Task.Delay(retryDelaysMs[attempt - 1]);
+                        continue;
+                    }
+
+                    return fallback;
+                }
+
+                // Strip markdown code fences if the model wraps its JSON in ```json ... ```
+                var trimmed = text.Trim();
+                if (trimmed.StartsWith("```"))
+                {
+                    var firstNewline = trimmed.IndexOf('\n');
+                    if (firstNewline >= 0)
+                        trimmed = trimmed[(firstNewline + 1)..];
+                    if (trimmed.EndsWith("```"))
+                        trimmed = trimmed[..^3];
+                    trimmed = trimmed.Trim();
+                }
+
+                // Parse the AI's JSON response
+                try
+                {
+                    using var triageDoc = JsonDocument.Parse(trimmed);
+                    var root = triageDoc.RootElement;
+
+                    var category = root.GetProperty("category").GetString() ?? "Other";
+                    if (category is not ("Fees" or "Schedule" or "Courses" or "Other"))
+                        category = "Other";
+
+                    var needsHuman = root.GetProperty("needs_human").GetBoolean();
+                    var draftReply = root.GetProperty("draft_reply").GetString() ?? "";
+
+                    return new TriageResult
+                    {
+                        Category = category,
+                        NeedsHuman = needsHuman,
+                        DraftReply = draftReply
+                    };
+                }
+                catch (Exception jsonEx)
+                {
+                    _logger.LogWarning("Invalid JSON on attempt {Attempt}: {Message}. Body: {Body}",
+                        attempt, jsonEx.Message, Truncate(trimmed, 200));
+                    if (attempt < maxAttempts)
+                    {
+                        await Task.Delay(retryDelaysMs[attempt - 1]);
+                        continue;
+                    }
+
+                    return fallback;
+                }
+            }
+            catch (TaskCanceledException) when (!System.Threading.CancellationToken.None.IsCancellationRequested)
+            {
+                _logger.LogWarning("Request timed out on attempt {Attempt}.", attempt);
+                if (attempt < maxAttempts)
+                {
+                    await Task.Delay(retryDelaysMs[attempt - 1]);
+                    continue;
+                }
+
+                return fallback;
+            }
+            catch (HttpRequestException httpEx)
+            {
+                _logger.LogWarning("HTTP request exception on attempt {Attempt}: {Message}",
+                    attempt, httpEx.Message);
+                if (attempt < maxAttempts)
+                {
+                    await Task.Delay(retryDelaysMs[attempt - 1]);
+                    continue;
+                }
+
+                return fallback;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected exception on attempt {Attempt}.", attempt);
+                return fallback;
+            }
         }
+
+        return fallback;
     }
+
+    private static string Truncate(string value, int maxLength) =>
+        value.Length <= maxLength ? value : value[..maxLength];
 }
 
 public class TriageResult
