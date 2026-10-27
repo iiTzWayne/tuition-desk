@@ -281,7 +281,8 @@ Rules:
 4. If the child's age is outside 7 to 17, say the centre accepts ages 7 to 17.
 5. For fees, if the parent does not say primary or secondary, give both prices. Do not infer the school level from the age.
 6. Write the reply in the same language as the parent's message.
-7. Return ONLY a JSON object, no markdown: {""category"":""Fees|Schedule|Courses|Other"",""needs_human"":true or false,""draft_reply"":""...""}";
+7. State facts exactly as the FAQ states them. Do not add qualifiers or details the FAQ does not give (for example 'one-time', 'per year', 'refundable', discounts, deadlines, staff names, addresses or phone numbers).
+8. Return ONLY a JSON object, no markdown: {""category"":""Fees|Schedule|Courses|Other"",""needs_human"":true or false,""draft_reply"":""...""}";
 
     public GeminiService(HttpClient http, IConfiguration config)
     {
